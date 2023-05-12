@@ -1,155 +1,144 @@
-# -*- coding: utf-8 -*-
-
-# confluence-dumper, a Python project to export spaces, pages and attachments
-#
-# Copyright (c) Siemens AG, 2016
-#
-# Authors:
-#   Thomas Maier <thomas.tm.maier@siemens.com>
-#
-# This work is licensed under the terms of the MIT license.
-# See the LICENSE.md file in the top-level directory.
-
+import json
 import requests
 import shutil
 import re
-import urllib.request, urllib.parse, urllib.error
+from typing import Optional, Dict, Tuple, List
+from urllib.parse import quote, unquote
+
+from bs4 import BeautifulSoup
 
 
 class ConfluenceException(Exception):
     """Exception for Confluence export issues"""
 
-    def __init__(self, message):
-        super(ConfluenceException, self).__init__(message)
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
 
 
-def http_get(request_url, auth=None, headers=None, verify_peer_certificate=True, proxies=None):
-    """Requests a HTTP url and returns a requested JSON response.
+def http_get(
+    request_url: str,
+    auth: Optional[Tuple[str, str]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    verify_peer_certificate: bool = True,
+    proxies: Optional[Dict[str, str]] = None,
+) -> Dict:
+    """Requests a HTTP url and returns a requested JSON response."""
 
-    :param request_url: HTTP URL to request.
-    :param auth: (optional) Auth tuple to use HTTP Auth (supported: Basic/Digest/Custom).
-    :param headers: (optional) Dictionary of HTTP Headers to send with the :class:`Request`.
-    :param verify_peer_certificate: (optional) Flag to decide whether peer certificate has to be validated.
-    :param proxies: (optional) Dictionary mapping protocol to the URL of the proxy.
-    :returns: JSON response.
-    :raises: ConfluenceException in the case of the server does not answer HTTP code 200.
-    """
     response = requests.get(request_url, auth=auth, headers=headers, verify=verify_peer_certificate, proxies=proxies)
-    if 200 == response.status_code:
+    if response.status_code == 200:
         return response.json()
     else:
-        raise ConfluenceException(
-            "Error %s: %s on requesting %s" % (response.status_code, response.reason, request_url)
-        )
+        raise ConfluenceException(f"Error {response.status_code}: {response.reason} on requesting {request_url}")
 
 
 def http_download_binary_file(
-    request_url, file_path, auth=None, headers=None, verify_peer_certificate=True, proxies=None
-):
-    """Requests a HTTP url to save a file on the local filesystem.
+    request_url: str,
+    file_path: str,
+    auth: Optional[Tuple[str, str]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    verify_peer_certificate: bool = True,
+    proxies: Optional[Dict[str, str]] = None,
+) -> None:
+    """Requests a HTTP url to save a file on the local filesystem."""
 
-    :param request_url: Requested HTTP URL.
-    :param file_path: Local file path.
-    :param auth: (optional) Auth tuple to use HTTP Auth (supported: Basic/Digest/Custom).
-    :param headers: (optional) Dictionary of HTTP Headers to send with the :class:`Request`.
-    :param verify_peer_certificate: (optional) Flag to decide whether peer certificate has to be validated.
-    :param proxies: (optional) Dictionary mapping protocol to the URL of the proxy.
-    :raises: ConfluenceException in the case of the server does not answer with HTTP code 200.
-    """
     response = requests.get(
         request_url, stream=True, auth=auth, headers=headers, verify=verify_peer_certificate, proxies=proxies
     )
-    if 200 == response.status_code:
+    if response.status_code == 200:
         with open(file_path, "wb") as downloaded_file:
             response.raw.decode_content = True
-            try:
-                shutil.copyfileobj(response.raw, downloaded_file)
-            except:
-                downloaded_file.write("could not copy file")
+            shutil.copyfileobj(response.raw, downloaded_file)
     else:
-        raise ConfluenceException(
-            "Error %s: %s on requesting %s" % (response.status_code, response.reason, request_url)
-        )
+        raise ConfluenceException(f"Error {response.status_code}: {response.reason} on requesting {request_url}")
 
 
-def write_2_file(path, content):
-    """Writes a string to a file.
+def write_html(path: str, content: str) -> None:
+    """Writes a string to a file."""
 
-    :param path: Local file path.
-    :param content: String content to persist.
-    """
-    try:
-        with open(path, "w") as the_file:
-            the_file.write(content.encode("utf8"))
-    except:
-        print("File could not be written")
+    with open(path, "w", encoding="utf-8") as the_file:
+        the_file.write(content)
 
 
-def write_html_2_file(path, title, content, html_template, additional_headers=None):
-    """Writes HTML content to a file using a template.
+def write_json(path: str, content: dict) -> None:
+    """Writes a dictionary to a file in JSON format with proper formatting."""
+    with open(path, "w", encoding="utf-8") as the_file:
+        json.dump(content, the_file, ensure_ascii=False, indent=4)
 
-    :param path: Local file path
-    :param title: page title
-    :param content: page content
-    :param html_template: page template; supported placeholders: ``{% title %}``, ``{% content %}``
-    :param additional_headers: (optional) Additional HTML headers.
-    """
-    html_content = html_template
 
-    # Build additional HTML headers
+def extract_content(html: str, web_url: str) -> Dict:
+    # Parse the HTML with Beautiful Soup
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Iterate over all elements in the HTML
+    paragraphs = []
+    for element in soup.find_all():
+        if element.name.startswith("h") and len(element.name) == 2 and element.name[1].isdigit():
+            # Header found, update the current_header variable
+            current_header = element.name
+        elif element.name == "p":
+            # Paragraph found, add it to the paragraphs list with the current_header as the key
+            paragraphs.append({"header": current_header, "content": element.get_text()})
+
+    # Find title
+    title = soup.title.string if soup.title else "No Title"
+
+    # Create a dictionary with all the data
+    data = {"title": title, "url": web_url, "paragraphs": paragraphs}
+
+    return data
+
+
+def write_html_2_file(
+    path: str,
+    title: str,
+    content: str,
+    html_template: str,
+    web_url: str,
+    additional_headers: Optional[List[str]] = None,
+) -> None:
+    """Writes HTML content to a file using a template."""
+
     additional_html_headers = "\n\t".join(additional_headers) if additional_headers else ""
-
-    # Replace placeholders
-    # Note: One backslash has to be escaped with two avoid that backslashes are interpreted as escape chars
     replacements = {"title": title, "content": content, "additional_headers": additional_html_headers}
 
+    html_content = html_template  # Start with the original template
+
     for placeholder, replacement in replacements.items():
-        regex_placeholder = r"{%\s*" + placeholder + r"\s*%\}"
-        try:
-            html_content = re.sub(
-                regex_placeholder, replacement.replace("\\", "\\\\"), html_content, flags=re.IGNORECASE
-            )
-        except Exception as e:
-            raise ConfluenceException("Error %s: Cannot replace placeholders in template file." % e)
+        regex_placeholder = rf"{{%\s*{placeholder}\s*%}}"
+        html_content = re.sub(
+            regex_placeholder,
+            replacement.replace("\\", "\\\\"),
+            html_content,
+            flags=re.IGNORECASE,
+        )
 
-    write_2_file(path, html_content)
+    # Extract the html_content again to remove fluff
+    json_content = extract_content(html_content, web_url)
 
+    # Replace .html with .json
+    path = path.replace(".html", ".json")
 
-def sanitize_for_filename(original_string):
-    """Sanitizes a string to use it as a filename on most filesystems.
-
-    :param original_string: Original string to sanitize
-    :returns: Sanitized string/filename
-    """
-    sanitized_file_name = re.sub('[\\\\/:*?"<>|]', "_", original_string)
-    return sanitized_file_name
+    # Write the file
+    write_json(path, json_content)
 
 
-def decode_url(encoded_url):
-    """Unquotes and decodes a given URL.
+def sanitize_for_filename(original_string: str) -> str:
+    """Sanitizes a string to use it as a filename on most filesystems."""
 
-    :param encoded_url: Encoded URL.
-    :returns: Decoded URL.
-    """
-    # return urllib.parse.unquote(encoded_url.encode('utf8')).decode('utf8') # todo drose
-    return urllib.parse.unquote(encoded_url)
+    return re.sub('[\\\\/:*?"<>|]', "_", original_string)
 
 
-def encode_url(decoded_url):
-    """Quotes and encodes a given URL.
+def decode_url(encoded_url: str) -> str:
+    """Unquotes and decodes a given URL."""
 
-    :param decoded_url: Decoded URL.
-    :returns: Encoded URL.
-    """
-    return urllib.parse.quote(decoded_url.encode("utf8")).encode("utf8")
+    return unquote(encoded_url)
 
 
-def is_file_format(file_name, file_extensions):
-    """Checks whether the extension of the given file is in a list of file extensions.
+def encode_url(decoded_url: str) -> str:
+    """Quotes and encodes a given URL."""
 
-    :param file_name: Filename to check
-    :param file_extensions: File extensions as a list
-    :returns: True if the list contains the extension of the given file_name
-    """
-    file_extension = file_name.split(".")[-1]
-    return file_extension in file_extensions
+    return quote(decoded_url)
+
+
+def is_file_format(file_name: str, file_extensions: List[str]) -> bool:
+    """Checks whether the extension of the given file is in a list of file extensions."""
