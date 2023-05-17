@@ -138,5 +138,10 @@ ENV/
 # Rope project settings
 .ropeproject
 
-export
+export/
+export_cleaned/
 settings.py
+links_*
+.vscode/
+*.txt
+.DS_Store

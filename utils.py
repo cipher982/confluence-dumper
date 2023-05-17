@@ -69,12 +69,15 @@ def extract_content(html: str, web_url: str) -> Dict:
     # Parse the HTML with Beautiful Soup
     soup = BeautifulSoup(html, "html.parser")
 
+    # Initialize the current_header variable
+    current_header = ""
+
     # Iterate over all elements in the HTML
     paragraphs = []
     for element in soup.find_all():
         if element.name.startswith("h") and len(element.name) == 2 and element.name[1].isdigit():
             # Header found, update the current_header variable
-            current_header = element.name
+            current_header = element.get_text()
         elif element.name == "p":
             # Paragraph found, add it to the paragraphs list with the current_header as the key
             paragraphs.append({"header": current_header, "content": element.get_text()})
