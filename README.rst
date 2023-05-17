@@ -1,3 +1,6 @@
+**Modified Fork for JSON Building**
+This is designed specifically for extracting title, headers, and content into a set of JSON documents, rather than rebuilding the original HTML files.
+
 ==============
 How to install
 ==============
